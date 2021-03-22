@@ -1,14 +1,17 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
 	"index/suffixarray"
+	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
+	"strings"
 )
 
 func main() {
@@ -36,7 +39,7 @@ func main() {
 }
 
 type Searcher struct {
-	CompleteWorks string
+	CompleteWorks []byte
 	SuffixArray   *suffixarray.Index
 }
 
@@ -63,20 +66,58 @@ func handleSearch(searcher Searcher) func(w http.ResponseWriter, r *http.Request
 }
 
 func (s *Searcher) Load(filename string) error {
-	dat, err := ioutil.ReadFile(filename)
+	f, err := os.Open(filename)
 	if err != nil {
 		return fmt.Errorf("Load: %w", err)
 	}
-	s.CompleteWorks = string(dat)
+	defer f.Close()
+	loweredStream, originalStream := s.ToLower(f)
+	dat, err := ioutil.ReadAll(loweredStream)
+	if err != nil {
+		return fmt.Errorf("Couldn't read lower case stream: %w", err)
+	}
 	s.SuffixArray = suffixarray.New(dat)
+
+	s.CompleteWorks, err = ioutil.ReadAll(originalStream)
+	if err != nil {
+		return fmt.Errorf("Couldn't read actual file stream: %w", err)
+	}
+
 	return nil
 }
 
+// To lower will
+func (s *Searcher) ToLower(reader io.Reader) (io.Reader, io.Reader) {
+	bufReader := bufio.NewReader(reader)
+	loweredReader := new(bytes.Buffer)
+	originalReader := new(bytes.Buffer)
+	for b, err := bufReader.ReadByte(); err == nil; b, err = bufReader.ReadByte() {
+		originalReader.WriteByte(b)
+		if b >= 65 && b <= 90 {
+			b += 32
+		}
+		loweredReader.WriteByte(b)
+	}
+
+	return loweredReader, originalReader
+}
+
 func (s *Searcher) Search(query string) []string {
-	idxs := s.SuffixArray.Lookup([]byte(query), -1)
+	idxs := s.SuffixArray.Lookup([]byte(strings.ToLower(query)), -1)
 	results := []string{}
+	bud := new(strings.Builder)
+	l := len(query)
 	for _, idx := range idxs {
-		results = append(results, s.CompleteWorks[idx-250:idx+250])
+		if idx < 250 {
+
+		}
+		bud.Write(s.CompleteWorks[idx-250 : idx])
+		bud.WriteString("<b>")
+		bud.Write(s.CompleteWorks[idx : idx+l])
+		bud.WriteString("</b>")
+		bud.Write(s.CompleteWorks[idx+l : idx+l+250])
+		results = append(results, bud.String())
+
 	}
 	return results
 }
