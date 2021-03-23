@@ -41,6 +41,7 @@ func main() {
 type Searcher struct {
 	CompleteWorks []byte
 	SuffixArray   *suffixarray.Index
+	Paragraphs    []int
 }
 
 func handleSearch(searcher Searcher) func(w http.ResponseWriter, r *http.Request) {
@@ -91,14 +92,35 @@ func (s *Searcher) ToLower(reader io.Reader) (io.Reader, io.Reader) {
 	bufReader := bufio.NewReader(reader)
 	loweredReader := new(bytes.Buffer)
 	originalReader := new(bytes.Buffer)
+	s.Paragraphs = append(s.Paragraphs, 0) // Starting of the text
+	nextParagraph := -1
+	var pstring string
+	i := 0
+	var even = true
 	for b, err := bufReader.ReadByte(); err == nil; b, err = bufReader.ReadByte() {
 		originalReader.WriteByte(b)
 		if b >= 65 && b <= 90 {
 			b += 32
+		} else { // Here we are recording all the paragraph breaks (if any)
+			if b == '\r' {
+				nextParagraph = i
+				pstring = "\r"
+			} else if b == '\n' && strings.HasPrefix(pstring, "\r") {
+				pstring += string(b)
+			} else {
+				if nextParagraph != -1 {
+					var x = i
+					if even {
+						x = nextParagraph
+					}
+					s.Paragraphs = append(s.Paragraphs, x)
+					nextParagraph = -1
+				}
+			}
 		}
 		loweredReader.WriteByte(b)
+		i++
 	}
-
 	return loweredReader, originalReader
 }
 
@@ -108,16 +130,31 @@ func (s *Searcher) Search(query string) []string {
 	bud := new(strings.Builder)
 	l := len(query)
 	for _, idx := range idxs {
-		if idx < 250 {
-
-		}
-		bud.Write(s.CompleteWorks[idx-250 : idx])
+		open, close := findEnclosingParagraph(s.Paragraphs, idx)
+		bud.WriteString("<tr>============================================<pre>")
+		bud.Write(s.CompleteWorks[open:idx])
 		bud.WriteString("<b>")
 		bud.Write(s.CompleteWorks[idx : idx+l])
 		bud.WriteString("</b>")
-		bud.Write(s.CompleteWorks[idx+l : idx+l+250])
+		bud.Write(s.CompleteWorks[idx+l : close])
+		bud.WriteString("</pre></tr>")
 		results = append(results, bud.String())
 
 	}
 	return results
+}
+
+// Finds the enclosing paragraph, around a found match
+func findEnclosingParagraph(ar []int, idx int) (int, int) {
+	var i, open, close int
+	for i = 0; i < len(ar) && ar[i] < idx; i++ {
+	}
+	if i < len(ar)-1 {
+		if i > 0 {
+			open = ar[i-1]
+
+		}
+		close = ar[i+1]
+	}
+	return open, close
 }
